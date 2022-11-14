@@ -1,19 +1,15 @@
 package gcp
 
 import (
-	"context"
 	"fmt"
 	"net"
-	"net/http"
 	"testing"
 
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
 	compute "google.golang.org/api/compute/v1"
 	dns "google.golang.org/api/dns/v1"
-	"google.golang.org/api/googleapi"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/openshift/installer/pkg/asset/installconfig/gcp/mock"
 	"github.com/openshift/installer/pkg/ipnet"
@@ -358,11 +354,10 @@ func TestGCPEnabledServicesList(t *testing.T) {
 	}{{
 		name:     "No services present",
 		services: nil,
-		err:      "unable to fetch enabled services for project. Make sure 'serviceusage.googleapis.com' is enabled",
-	}, {
-		name:     "Service Usage missing",
-		services: []string{"compute.googleapis.com"},
-		err:      "unable to fetch enabled services for project. Make sure 'serviceusage.googleapis.com' is enabled",
+		err: "following required services are not enabled in this project storage-component.googleapis.com," +
+			" servicemanagement.googleapis.com, storage-api.googleapis.com, compute.googleapis.com," +
+			" cloudapis.googleapis.com, dns.googleapis.com, iam.googleapis.com, iamcredentials.googleapis.com," +
+			" serviceusage.googleapis.com, cloudresourcemanager.googleapis.com",
 	}, {
 		name: "All pre-existing",
 		services: []string{"compute.googleapis.com",
@@ -372,11 +367,9 @@ func TestGCPEnabledServicesList(t *testing.T) {
 			"deploymentmanager.googleapis.com"},
 	}, {
 		name:     "Some services present",
-		services: []string{"compute.googleapis.com", "serviceusage.googleapis.com"},
-		err:      "the following required services are not enabled in this project: cloudresourcemanager.googleapis.com,dns.googleapis.com,iam.googleapis.com,iamcredentials.googleapis.com",
+		services: []string{"compute.googleapis.com"},
+		err:      "enable all services before creating the cluster",
 	}}
-
-	errForbidden := &googleapi.Error{Code: http.StatusForbidden}
 
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -384,12 +377,8 @@ func TestGCPEnabledServicesList(t *testing.T) {
 			defer mockCtrl.Finish()
 			gcpClient := mock.NewMockAPI(mockCtrl)
 
-			if !sets.NewString(test.services...).Has("serviceusage.googleapis.com") {
-				gcpClient.EXPECT().GetEnabledServices(gomock.Any(), gomock.Any()).Return(nil, errForbidden).AnyTimes()
-			} else {
-				gcpClient.EXPECT().GetEnabledServices(gomock.Any(), gomock.Any()).Return(test.services, nil).AnyTimes()
-			}
-			err := ValidateEnabledServices(context.TODO(), gcpClient, "")
+			gcpClient.EXPECT().GetEnabledServices(gomock.Any(), gomock.Any()).Return(test.services, nil).AnyTimes()
+			err := ValidateEnabledServices(nil, gcpClient, "")
 			if test.err == "" {
 				assert.NoError(t, err)
 			} else {
